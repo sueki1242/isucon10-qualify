@@ -1,1 +1,0 @@
-# isucon10-qual
