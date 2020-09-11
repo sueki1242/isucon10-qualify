@@ -3,6 +3,7 @@ set -eux
 
 
 function install_alp() {
+    cd /tmp
     wget https://github.com/tkuchiki/alp/releases/download/v1.0.3/alp_linux_amd64.zip
     unzip alp_linux_amd64.zip
     sudo install ./alp /usr/local/bin
@@ -11,6 +12,7 @@ function install_alp() {
 }
 
 function install_pt_query_digest() {
+    cd /tmp
     curl -L https://github.com/percona/percona-toolkit/archive/3.0.5-test.tar.gz | tar zxv
     ./percona-toolkit-3.0.5-test/bin/pt-query-digest --version
     sudo mv ./percona-toolkit-3.0.5-test/bin/pt-query-digest /usr/local/bin/pt-query-digest
@@ -19,8 +21,8 @@ function install_pt_query_digest() {
 
 function install_newrelic() {
     cd
-    git clone https://github.com/newrelic/c-sdk
-    cd c-sdk
+    git clone https://github.com/newrelic/c-sdk newrelic-c-sdk
+    cd newrelic-c-sdk
     make
     sudo mkdir -p /var/log/newrelic
     sudo chmod a+w /var/log/newrelic
