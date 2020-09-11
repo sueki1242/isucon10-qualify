@@ -29,9 +29,9 @@ function install_newrelic() {
 }
 
 function install_netdata() {
-    bash <(curl -Ss https://my-netdata.io/kickstart.sh) --no-updates --stable-channel --disable-telemetry --non-interactive
+    bash <(curl -Ss https://my-netdata.io/kickstart.sh) --no-updates --stable-channel --disable-telemetry
 
-    sudo tee /etc/nginx/sites-enabled/netdata.conf > /dev/null <<EOH
+    sudo sh -c "cat >/etc/nginx/sites-enabled/netdata.conf" <<EOH
     server {
         location /netdata/ {
             proxy_pass http://127.0.0.1:19999/;
@@ -45,5 +45,7 @@ sudo apt install -y unzip libpcre3-dev git
 install_alp &
 install_pt_query_digest &
 install_newrelic &
-install_netdata &
 wait
+
+# netdata installation requires user input
+install_netdata
