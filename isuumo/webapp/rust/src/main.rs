@@ -554,7 +554,7 @@ async fn search_chairs(
         params.push((page * per_page).into());
         let chairs = conn.exec(
             format!(
-                "select * from chair where {} order by popularity desc, id asc limit ? offset ?",
+                "select * from chair where {} order by popularity desc, id desc limit ? offset ?",
                 search_condition
             ),
             &params,
@@ -928,7 +928,7 @@ async fn search_estates(
         params.push((page * per_page).into());
         let estates = conn.exec(
             format!(
-                "select * from estate where {} order by popularity desc, id asc limit ? offset ?",
+                "select * from estate where {} order by popularity desc, id desc limit ? offset ?",
                 search_condition
             ),
             &params,
@@ -989,7 +989,7 @@ async fn search_recommended_estate_with_chair(
         if let Some(chair) = chair {
             let mut whd = vec![chair.width, chair.height, chair.depth];
             whd.sort();
-            let query = "select * from estate where (door_width >= ? and door_height >= ?) or (door_width >= ? and door_height >= ?) order by popularity desc, id asc limit ?";
+            let query = "select * from estate where (door_width >= ? and door_height >= ?) or (door_width >= ? and door_height >= ?) order by popularity desc, id desc limit ?";
             let params: Vec<mysql::Value> = vec![
                 whd[0].into(),
                 whd[1].into(),
@@ -1084,7 +1084,7 @@ async fn search_estate_nazotte(
 
     let mut estates = web::block(move || {
         let mut conn = db.get().expect("Failed to checkout database connection");
-        let query = format!("select * from estate where ST_Contains(ST_PolygonFromText({}), location) order by popularity desc, id asc", coordinates.coordinates_to_text());
+        let query = format!("select * from estate where ST_Contains(ST_PolygonFromText({}), location) order by popularity desc, id desc", coordinates.coordinates_to_text());
         let estates_in_polygon: Vec<Estate> = conn.exec(query, ())?;
 
         Ok(estates_in_polygon)
