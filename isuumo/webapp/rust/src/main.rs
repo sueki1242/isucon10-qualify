@@ -790,7 +790,8 @@ async fn post_estate(db: web::Data<Pool>, mut payload: Multipart) -> Result<Http
         let mut conn = db.get().expect("Failed to checkout database connection");
         let mut tx = conn.start_transaction(mysql::TxOpts::default())?;
         for estate in estates {
-            tx.exec_drop("insert into estate (id, name, description, thumbnail, address, latitude, longitude, rent, door_height, door_width, features, popularity) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (estate.id, estate.name, estate.description, estate.thumbnail, estate.address, estate.latitude, estate.longitude, estate.rent, estate.door_height, estate.door_width, estate.features, estate.popularity))?;
+            let query = format!("insert into estate (id, name, description, thumbnail, address, latitude, longitude, rent, door_height, door_width, features, popularity, location) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, Point({}, {}))", estate.latitude, estate.longitude);
+            tx.exec_drop(query, (estate.id, estate.name, estate.description, estate.thumbnail, estate.address, estate.latitude, estate.longitude, estate.rent, estate.door_height, estate.door_width, estate.features, estate.popularity))?;
         }
         tx.commit()?;
         Ok(())
@@ -925,14 +926,13 @@ async fn search_estates(
 
         params.push(per_page.into());
         params.push((page * per_page).into());
-        let mut estates = conn.exec(
+        let estates = conn.exec(
             format!(
-                "select * from estate where {} order by popularity, id asc limit ? offset ?",
+                "select * from estate where {} order by popularity desc, id asc limit ? offset ?",
                 search_condition
             ),
             &params,
         )?;
-        estates.reverse();
         Ok(EstateSearchResponse { count, estates })
     })
     .await
@@ -1080,12 +1080,12 @@ async fn search_estate_nazotte(
     if coordinates.coordinates.is_empty() {
         return Ok(HttpResponse::BadRequest().finish());
     }
-    let bounding_box = coordinates.get_bounding_box();
+    // let bounding_box = coordinates.get_bounding_box();
 
     let mut estates = web::block(move || {
         let mut conn = db.get().expect("Failed to checkout database connection");
-        let query = format!("select * from estate where latitude <= ? and latitude >= ? and longitude <= ? and longitude >= ? and ST_Contains(ST_PolygonFromText({}), ST_GeomFromText(CONCAT('POINT(', estate.latitude, ' ', estate.longitude, ')'))) order by popularity desc, id asc", coordinates.coordinates_to_text());
-        let estates_in_polygon: Vec<Estate> = conn.exec(query, (bounding_box.bottom_right_corner.latitude, bounding_box.top_left_corner.latitude, bounding_box.bottom_right_corner.longitude, bounding_box.top_left_corner.longitude))?;
+        let query = format!("select * from estate where ST_Contains(ST_PolygonFromText({}), location) order by popularity desc, id asc", coordinates.coordinates_to_text());
+        let estates_in_polygon: Vec<Estate> = conn.exec(query, ())?;
 
         Ok(estates_in_polygon)
     })
