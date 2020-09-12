@@ -9,6 +9,9 @@ use std::env;
 use std::fs::File;
 use std::sync::Arc;
 
+#[macro_use]
+mod newrelic_util;
+
 type Pool = r2d2::Pool<r2d2_mysql::MysqlConnectionManager>;
 type BlockingDBError = actix_web::error::BlockingError<mysql::Error>;
 
@@ -70,6 +73,8 @@ async fn main() -> std::io::Result<()> {
         .max_size(10)
         .build(manager)
         .expect("Failed to create connection pool");
+    
+    newrelic_init!();
 
     let mut listenfd = ListenFd::from_env();
     let server = HttpServer::new(move || {
@@ -177,6 +182,8 @@ struct InitializeResponse {
 async fn initialize(
     mysql_connection_env: web::Data<Arc<MySQLConnectionEnv>>,
 ) -> Result<HttpResponse, AWError> {
+    newrelic_transaction!("POST /initialize");
+
     let sql_dir = std::path::Path::new("..").join("mysql").join("db");
     let paths = [
         sql_dir.join("0_Schema.sql"),
@@ -259,6 +266,8 @@ async fn get_chair_detail(
     db: web::Data<Pool>,
     path: web::Path<(i64,)>,
 ) -> Result<HttpResponse, AWError> {
+    newrelic_transaction!("GET /api/chair/{id}");
+
     let id = path.0;
 
     let chair: Option<Chair> = web::block(move || {
@@ -322,6 +331,8 @@ impl Into<Chair> for CSVChair {
 }
 
 async fn post_chair(db: web::Data<Pool>, mut payload: Multipart) -> Result<HttpResponse, AWError> {
+    newrelic_transaction!("POST /api/chair");
+
     let mut chairs: Option<Vec<Chair>> = None;
     while let Ok(Some(field)) = payload.try_next().await {
         let content_disposition = field.content_disposition().unwrap();
@@ -414,6 +425,8 @@ async fn search_chairs(
     db: web::Data<Pool>,
     query_params: web::Query<SearchChairsParams>,
 ) -> Result<HttpResponse, AWError> {
+    newrelic_transaction!("GET /api/chair/search");
+
     let mut conditions = Vec::new();
     let mut params: Vec<mysql::Value> = Vec::new();
 
@@ -573,6 +586,8 @@ struct ChairListResponse {
 }
 
 async fn get_low_priced_chair(db: web::Data<Pool>) -> Result<HttpResponse, AWError> {
+    newrelic_transaction!("GET /api/chair/low_priced");
+
     let chairs = web::block(move || {
         let mut conn = db.get().expect("Failed to checkout database connection");
         conn.exec(
@@ -592,6 +607,8 @@ async fn get_low_priced_chair(db: web::Data<Pool>) -> Result<HttpResponse, AWErr
 async fn get_chair_search_condition(
     chair_search_condition: web::Data<Arc<ChairSearchCondition>>,
 ) -> Result<HttpResponse, AWError> {
+    newrelic_transaction!("GET /api/chair/search/condition");
+
     Ok(HttpResponse::Ok().json(chair_search_condition.as_ref().as_ref()))
 }
 
@@ -605,6 +622,8 @@ async fn buy_chair(
     path: web::Path<(i64,)>,
     _params: web::Json<BuyChairRequest>,
 ) -> Result<HttpResponse, AWError> {
+    newrelic_transaction!("POST /api/chair/buy/{id}");
+
     let id = path.0;
 
     let found: bool = web::block(move || {
@@ -680,6 +699,8 @@ async fn get_estate_detail(
     db: web::Data<Pool>,
     path: web::Path<(i64,)>,
 ) -> Result<HttpResponse, AWError> {
+    newrelic_transaction!("GET /api/estate/{id}");
+
     let id = path.0;
 
     let estate: Option<Estate> = web::block(move || {
@@ -735,6 +756,8 @@ impl Into<Estate> for CSVEstate {
 }
 
 async fn post_estate(db: web::Data<Pool>, mut payload: Multipart) -> Result<HttpResponse, AWError> {
+    newrelic_transaction!("POST /api/estate");
+
     let mut estates: Option<Vec<Estate>> = None;
     while let Ok(Some(field)) = payload.try_next().await {
         let content_disposition = field.content_disposition().unwrap();
@@ -807,6 +830,8 @@ async fn search_estates(
     db: web::Data<Pool>,
     query_params: web::Query<SearchEstatesParams>,
 ) -> Result<HttpResponse, AWError> {
+    newrelic_transaction!("GET /api/estate/search");
+
     let mut conditions = Vec::new();
     let mut params: Vec<mysql::Value> = Vec::new();
 
@@ -924,6 +949,8 @@ struct EstateListResponse {
 }
 
 async fn get_low_priced_estate(db: web::Data<Pool>) -> Result<HttpResponse, AWError> {
+    newrelic_transaction!("GET /api/estate/low_priced");
+
     let estates = web::block(move || {
         let mut conn = db.get().expect("Failed to checkout database connection");
         conn.exec(
@@ -943,6 +970,8 @@ async fn get_low_priced_estate(db: web::Data<Pool>) -> Result<HttpResponse, AWEr
 async fn get_estate_search_condition(
     estate_search_condition: web::Data<Arc<EstateSearchCondition>>,
 ) -> Result<HttpResponse, AWError> {
+    newrelic_transaction!("GET /api/estate/search/condition");
+
     Ok(HttpResponse::Ok().json(estate_search_condition.as_ref().as_ref()))
 }
 
@@ -950,6 +979,8 @@ async fn search_recommended_estate_with_chair(
     db: web::Data<Pool>,
     path: web::Path<(i64,)>,
 ) -> Result<HttpResponse, AWError> {
+    newrelic_transaction!("GET /api/recommended_estate/{id}");
+
     let id = path.0;
 
     let estates = web::block(move || {
@@ -1053,6 +1084,8 @@ async fn search_estate_nazotte(
     db: web::Data<Pool>,
     coordinates: web::Json<Coordinates>,
 ) -> Result<HttpResponse, AWError> {
+    newrelic_transaction!("POST /api/estate/nazotte");
+
     if coordinates.coordinates.is_empty() {
         return Ok(HttpResponse::BadRequest().finish());
     }
@@ -1099,6 +1132,8 @@ async fn post_estate_request_document(
     path: web::Path<(i64,)>,
     _params: web::Json<PostEstateRequestDocumentParams>,
 ) -> Result<HttpResponse, AWError> {
+    newrelic_transaction!("POST /api/estate/req_doc/{id}");
+
     let id = path.0;
 
     let estate: Option<Estate> = web::block(move || {

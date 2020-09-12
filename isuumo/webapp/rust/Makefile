@@ -1,6 +1,6 @@
 NEWRELIC:=
 # TODO: Enable newrelic after embedding newrelic code to app.
-CARGO_OPT=--release --locked #$(if $(NEWRELIC),--features use_newrelic,)
+CARGO_OPT=--release --locked $(if $(NEWRELIC),--features use_newrelic,)
 SYSTEMD_SERVICE_NAME=isucon.rust
 
 .PHONY: rundev
