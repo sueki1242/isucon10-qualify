@@ -1,5 +1,6 @@
 NEWRELIC:=
-CARGO_OPT=--release $(if $(NEWRELIC),--features use_newrelic,)
+# TODO: Enable newrelic after embedding newrelic code to app.
+CARGO_OPT=--release # $(if $(NEWRELIC),--features use_newrelic,)
 SYSTEMD_SERVICE_NAME=isucon.rust
 
 .PHONY: run
