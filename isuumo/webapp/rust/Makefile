@@ -3,6 +3,7 @@ NEWRELIC:=
 CARGO_OPT=--release --locked #$(if $(NEWRELIC),--features use_newrelic,)
 SYSTEMD_SERVICE_NAME=isucon.rust
 
+.PHONY: rundev
 rundev:
 	# systemfd and cargo-watch is required for autoloading
 	# % cargo systemfd cargo-watch
