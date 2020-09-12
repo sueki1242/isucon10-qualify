@@ -20,6 +20,7 @@ CREATE TABLE isuumo.estate
     popularity  INTEGER             NOT NULL,
     location    POINT               NOT NULL,
     INDEX  idx_sort1 (popularity, id),
+    INDEX  idx_sort2 (rent, id),
     SPATIAL KEY `location` (`location`)
 );
 
