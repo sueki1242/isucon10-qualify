@@ -5,9 +5,13 @@ use futures::TryStreamExt;
 use listenfd::ListenFd;
 use mysql::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::env;
 use std::fs::File;
 use std::sync::Arc;
+use std::sync::RwLock;
+use std::sync::Mutex;
+
 
 #[macro_use]
 mod newrelic_util;
@@ -44,6 +48,11 @@ impl Default for MySQLConnectionEnv {
     }
 }
 
+struct AppCache {
+    low_priced_estates: Mutex<Vec<Estate>>,
+}
+
+
 #[actix_rt::main]
 async fn main() -> std::io::Result<()> {
     if env::var("RUST_LOG").is_err() {
@@ -60,6 +69,9 @@ async fn main() -> std::io::Result<()> {
         let file = File::open("../fixture/estate_condition.json")?;
         Arc::new(serde_json::from_reader(file)?)
     };
+    let app_cache = web::Data::new(AppCache {
+        low_priced_estates: Mutex::new(vec![]),
+    });
 
     let manager = r2d2_mysql::MysqlConnectionManager::new(
         mysql::OptsBuilder::new()
@@ -82,6 +94,7 @@ async fn main() -> std::io::Result<()> {
             .data(mysql_connection_env.clone())
             .data(chair_search_condition.clone())
             .data(estate_search_condition.clone())
+            .app_data(app_cache.clone())
             .wrap(middleware::Logger::default())
             .route("/initialize", web::post().to(initialize))
             .service(
@@ -179,6 +192,8 @@ struct InitializeResponse {
 }
 
 async fn initialize(
+    db: web::Data<Pool>,
+    data: web::Data<AppCache>,
     mysql_connection_env: web::Data<Arc<MySQLConnectionEnv>>,
 ) -> Result<HttpResponse, AWError> {
     newrelic_transaction!("POST /initialize");
@@ -213,6 +228,23 @@ async fn initialize(
             log::error!("Initialize script {} failed", p.display());
             return Ok(HttpResponse::InternalServerError().finish());
         }
+    }
+    {
+        // initialize low_priced_estates
+        let estates = web::block(move || {
+            let mut conn = db.get().expect("Failed to checkout database connection");
+            conn.exec(
+                "select * from estate order by rent asc, id asc limit ?",
+                (LIMIT,),
+            )
+        })
+        .await
+        .map_err(|e| {
+            log::error!("get_low_priced_estate DB execution error : {:?}", e);
+            HttpResponse::InternalServerError()
+        })?;
+        let mut cache = data.low_priced_estates.lock().unwrap();
+        *cache = estates;
     }
     Ok(HttpResponse::Ok().json(InitializeResponse {
         language: "rust".to_owned(),
@@ -653,7 +685,7 @@ async fn buy_chair(
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct Estate {
     id: i64,
     name: String,
@@ -948,9 +980,13 @@ struct EstateListResponse {
     estates: Vec<Estate>,
 }
 
-async fn get_low_priced_estate(db: web::Data<Pool>) -> Result<HttpResponse, AWError> {
+async fn get_low_priced_estate(
+    data: web::Data<AppCache>,
+    db: web::Data<Pool>
+) -> Result<HttpResponse, AWError> {
     newrelic_transaction!("GET /api/estate/low_priced");
 
+    /*
     let estates = web::block(move || {
         let mut conn = db.get().expect("Failed to checkout database connection");
         conn.exec(
@@ -963,8 +999,9 @@ async fn get_low_priced_estate(db: web::Data<Pool>) -> Result<HttpResponse, AWEr
         log::error!("get_low_priced_estate DB execution error : {:?}", e);
         HttpResponse::InternalServerError()
     })?;
-
-    Ok(HttpResponse::Ok().json(EstateListResponse { estates }))
+*/
+    let cached_estates = &(*data.low_priced_estates.lock().unwrap());
+    Ok(HttpResponse::Ok().json(EstateListResponse { estates: cached_estates.to_vec() }))
 }
 
 async fn get_estate_search_condition(
