@@ -107,6 +107,7 @@ async fn main() -> std::io::Result<()> {
     );
     let pool_chair = r2d2::Pool::builder()
         .max_size(10)
+        .connection_timeout(std::time::Duration::from_secs(300))
         .build(manager_chair)
         .expect("Failed to create connection pool for chair");
 
@@ -120,6 +121,7 @@ async fn main() -> std::io::Result<()> {
     );
     let pool_estate = r2d2::Pool::builder()
         .max_size(10)
+        .connection_timeout(std::time::Duration::from_secs(300))
         .build(manager_estate)
         .expect("Failed to create connection pool for estate");
     
