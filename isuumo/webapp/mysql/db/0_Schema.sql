@@ -19,6 +19,7 @@ CREATE TABLE isuumo.estate
     features    VARCHAR(64)         NOT NULL,
     popularity  INTEGER             NOT NULL,
     location    POINT               NOT NULL,
+    INDEX  idx_sort1 (popularity, id),
     SPATIAL KEY `location` (`location`)
 );
 
@@ -36,5 +37,6 @@ CREATE TABLE isuumo.chair
     features    VARCHAR(64)     NOT NULL,
     kind        VARCHAR(64)     NOT NULL,
     popularity  INTEGER         NOT NULL,
-    stock       INTEGER         NOT NULL
+    stock       INTEGER         NOT NULL,
+    INDEX  idx_sort1 (popularity, id)
 );
