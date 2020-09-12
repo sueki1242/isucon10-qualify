@@ -22,8 +22,6 @@ CREATE TABLE isuumo.estate
     SPATIAL KEY `location` (`location`)
 );
 
-alter table estate add spatial index (location);
-
 CREATE TABLE isuumo.chair
 (
     id          INTEGER         NOT NULL PRIMARY KEY,
