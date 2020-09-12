@@ -303,9 +303,6 @@ async fn initialize(
         })?;
         let mut cache = data.low_priced_estates.lock().unwrap();
         *cache = estates;
-
-        log::error!("initialize finished. ");
-
     }
     Ok(HttpResponse::Ok().json(InitializeResponse {
         language: "rust".to_owned(),
@@ -1060,22 +1057,7 @@ async fn get_low_priced_estate(
 ) -> Result<HttpResponse, AWError> {
     newrelic_transaction!("GET /api/estate/low_priced");
 
-    /*
-    let estates = web::block(move || {
-        let mut conn = db.estate.get().expect("Failed to checkout database connection");
-        conn.exec(
-            "select * from estate order by rent asc, id asc limit ?",
-            (LIMIT,),
-        )
-    })
-    .await
-    .map_err(|e| {
-        log::error!("get_low_priced_estate DB execution error : {:?}", e);
-        HttpResponse::InternalServerError()
-    })?;
-*/
     let cached_estates = &(*data.low_priced_estates.lock().unwrap());
-    log::error!("cached_estates : {:?}", cached_estates);
     Ok(HttpResponse::Ok().json(EstateListResponse { estates: cached_estates.to_vec() }))
 }
 
