@@ -246,7 +246,7 @@ struct InitializeResponse {
 }
 
 async fn initialize(
-    db: web::Data<Pool>,
+    db: web::Data<MultiPool>,
     data: web::Data<AppCache>,
     mysql_connection_env: web::Data<Arc<MultiMySQLConnectionEnv>>,
 ) -> Result<HttpResponse, AWError> {
@@ -288,7 +288,7 @@ async fn initialize(
     {
         // initialize low_priced_estates
         let estates = web::block(move || {
-            let mut conn = db.get().expect("Failed to checkout database connection");
+            let mut conn = db.estate.get().expect("Failed to checkout database connection");
             conn.exec(
                 "select * from estate order by rent asc, id asc limit ?",
                 (LIMIT,),
