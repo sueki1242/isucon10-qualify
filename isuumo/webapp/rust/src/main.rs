@@ -1092,7 +1092,7 @@ async fn search_estate_nazotte(
 
     let mut estates = web::block(move || {
         let mut conn = db.get().expect("Failed to checkout database connection");
-        let query = "select * from estate where latitude <= ? and latitude >= ? and longitude <= ? and longitude >= ? and ST_Contains(ST_PolygonFromText({}), ST_GeomFromText(CONCAT('POINT(', estate.latitude, ' ', estate.longitude, ')'))) order by popularity desc, id asc";
+        let query = format!("select * from estate where latitude <= ? and latitude >= ? and longitude <= ? and longitude >= ? and ST_Contains(ST_PolygonFromText({}), ST_GeomFromText(CONCAT('POINT(', estate.latitude, ' ', estate.longitude, ')'))) order by popularity desc, id asc", coordinates.coordinates_to_text());
         let estates_in_polygon: Vec<Estate> = conn.exec(query, (bounding_box.bottom_right_corner.latitude, bounding_box.top_left_corner.latitude, bounding_box.bottom_right_corner.longitude, bounding_box.top_left_corner.longitude))?;
 
         Ok(estates_in_polygon)
