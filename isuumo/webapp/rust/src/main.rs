@@ -986,23 +986,14 @@ async fn search_recommended_estate_with_chair(
         let mut conn = db.get().expect("Failed to checkout database connection");
         let chair: Option<Chair> = conn.exec_first("select * from chair where id = ?", (id,))?;
         if let Some(chair) = chair {
-            let w = chair.width;
-            let h = chair.height;
-            let d = chair.depth;
-            let query = "select * from estate where (door_width >= ? and door_height >= ?) or (door_width >= ? and door_height >= ?) or (door_width >= ? and door_height >= ?) or (door_width >= ? and door_height >= ?) or (door_width >= ? and door_height >= ?) or (door_width >= ? and door_height >= ?) order by popularity desc, id asc limit ?";
+            let mut whd = vec![chair.width, chair.height, chair.depth];
+            whd.sort();
+            let query = "select * from estate where (door_width >= ? and door_height >= ?) or (door_width >= ? and door_height >= ?) order by popularity desc, id asc limit ?";
             let params: Vec<mysql::Value> = vec![
-                w.into(),
-                h.into(),
-                w.into(),
-                d.into(),
-                h.into(),
-                w.into(),
-                h.into(),
-                d.into(),
-                d.into(),
-                w.into(),
-                d.into(),
-                h.into(),
+                whd[0].into(),
+                whd[1].into(),
+                whd[1].into(),
+                whd[0].into(),
                 LIMIT.into(),
             ];
             Ok(Some(conn.exec(query, params)?))
