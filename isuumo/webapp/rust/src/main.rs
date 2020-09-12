@@ -302,7 +302,7 @@ async fn initialize(
         let mut cache = data.low_priced_estates.lock().unwrap();
         *cache = estates;
 
-        log::error!("initialize finished. cache : {:?}", data.low_priced_estates.lock().unwrap());
+        log::error!("initialize finished. ");
 
     }
     Ok(HttpResponse::Ok().json(InitializeResponse {
