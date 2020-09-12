@@ -1092,20 +1092,9 @@ async fn search_estate_nazotte(
 
     let mut estates = web::block(move || {
         let mut conn = db.get().expect("Failed to checkout database connection");
-        let query = "select * from estate where latitude <= ? and latitude >= ? and longitude <= ? and longitude >= ? order by popularity desc, id asc";
-        let estates_in_bounding_box: Vec<Estate> = conn.exec(query, (bounding_box.bottom_right_corner.latitude, bounding_box.top_left_corner.latitude, bounding_box.bottom_right_corner.longitude, bounding_box.top_left_corner.longitude))?;
-        if estates_in_bounding_box.is_empty() {
-            return Ok(Vec::new());
-        }
+        let query = "select * from estate where latitude <= ? and latitude >= ? and longitude <= ? and longitude >= ? and ST_Contains(ST_PolygonFromText({}), ST_GeomFromText(CONCAT('POINT(', estate.latitude, ' ', estate.longitude, ')'))) order by popularity desc, id asc";
+        let estates_in_polygon: Vec<Estate> = conn.exec(query, (bounding_box.bottom_right_corner.latitude, bounding_box.top_left_corner.latitude, bounding_box.bottom_right_corner.longitude, bounding_box.top_left_corner.longitude))?;
 
-        let mut estates_in_polygon = Vec::new();
-        for estate in estates_in_bounding_box {
-            let query = format!("select * from estate where id = ? and ST_Contains(ST_PolygonFromText({}), ST_GeomFromText('POINT({} {})'))", coordinates.coordinates_to_text(), estate.latitude, estate.longitude);
-            let validated_estate: Option<Estate> = conn.exec_first(query, (estate.id,))?;
-            if let Some(validated_estate) = validated_estate {
-                estates_in_polygon.push(validated_estate);
-            }
-        }
         Ok(estates_in_polygon)
     })
     .await
