@@ -845,7 +845,11 @@ impl Into<Estate> for CSVEstate {
     }
 }
 
-async fn post_estate(db: web::Data<MultiPool>, mut payload: Multipart) -> Result<HttpResponse, AWError> {
+async fn post_estate(
+    db: web::Data<MultiPool>, 
+    data: web::Data<AppCache>, 
+    mut payload: Multipart
+) -> Result<HttpResponse, AWError> {
     newrelic_transaction!("POST /api/estate");
 
     let mut estates: Option<Vec<Estate>> = None;
@@ -885,6 +889,15 @@ async fn post_estate(db: web::Data<MultiPool>, mut payload: Multipart) -> Result
             tx.exec_drop(query, (estate.id, estate.name, estate.description, estate.thumbnail, estate.address, estate.latitude, estate.longitude, estate.rent, estate.door_height, estate.door_width, estate.features, estate.popularity))?;
         }
         tx.commit()?;
+
+        let mut conn = db.estate.get().expect("Failed to checkout database connection");
+        let estates = conn.exec(
+            "select * from estate order by rent asc, id asc limit ?",
+            (LIMIT,),
+        )?;
+        let mut cache = data.low_priced_estates.lock().unwrap();
+        *cache = estates;
+
         Ok(())
     }).await.map_err(
         |e: BlockingDBError| {
