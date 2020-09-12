@@ -32,7 +32,7 @@ logf:
 .PHONY: alp
 alp:
 	# NOTE: Add -m '/xxx/.*,./yyy/.*' to aggreate logs
-	alp ltsv --file /var/log/nginx/access.log -m '/api/recommended_estate/.*,/api/chair/[0-9]+,/api/chair/buy/.*,/api/estate/[0-9]+,/api/estate/req_doc/.*' --sort=sum --filters="not(Uri startsWith '/netdata/')"
+	alp ltsv --file /var/log/nginx/access.log -r -m '/api/recommended_estate/.*,/api/chair/[0-9]+,/api/chair/buy/.*,/api/estate/[0-9]+,/api/estate/req_doc/.*' --sort=sum --filters="not(Uri startsWith '/netdata/')"
 
 .PHONY: query-digest
 query-digest:
