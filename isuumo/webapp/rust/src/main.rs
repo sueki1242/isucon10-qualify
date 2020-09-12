@@ -542,7 +542,7 @@ async fn search_chairs(
         params.push((page * per_page).into());
         let chairs = conn.exec(
             format!(
-                "select * from chair where {} order by popularity desc, id asc limit ? offset ?",
+                "select * from chair where {} order by popularity desc, id desc limit ? offset ?",
                 search_condition
             ),
             &params,
@@ -901,14 +901,13 @@ async fn search_estates(
 
         params.push(per_page.into());
         params.push((page * per_page).into());
-        let mut estates = conn.exec(
+        let estates = conn.exec(
             format!(
-                "select * from estate where {} order by popularity, id asc limit ? offset ?",
+                "select * from estate where {} order by popularity desc, id desc limit ? offset ?",
                 search_condition
             ),
             &params,
         )?;
-        estates.reverse();
         Ok(EstateSearchResponse { count, estates })
     })
     .await
@@ -960,7 +959,7 @@ async fn search_recommended_estate_with_chair(
             let w = chair.width;
             let h = chair.height;
             let d = chair.depth;
-            let query = "select * from estate where (door_width >= ? and door_height >= ?) or (door_width >= ? and door_height >= ?) or (door_width >= ? and door_height >= ?) or (door_width >= ? and door_height >= ?) or (door_width >= ? and door_height >= ?) or (door_width >= ? and door_height >= ?) order by popularity desc, id asc limit ?";
+            let query = "select * from estate where (door_width >= ? and door_height >= ?) or (door_width >= ? and door_height >= ?) or (door_width >= ? and door_height >= ?) or (door_width >= ? and door_height >= ?) or (door_width >= ? and door_height >= ?) or (door_width >= ? and door_height >= ?) order by popularity desc, id desc limit ?";
             let params: Vec<mysql::Value> = vec![
                 w.into(),
                 h.into(),
@@ -1061,7 +1060,7 @@ async fn search_estate_nazotte(
 
     let mut estates = web::block(move || {
         let mut conn = db.get().expect("Failed to checkout database connection");
-        let query = "select * from estate where latitude <= ? and latitude >= ? and longitude <= ? and longitude >= ? order by popularity desc, id asc";
+        let query = "select * from estate where latitude <= ? and latitude >= ? and longitude <= ? and longitude >= ? order by popularity desc, id desc";
         let estates_in_bounding_box: Vec<Estate> = conn.exec(query, (bounding_box.bottom_right_corner.latitude, bounding_box.top_left_corner.latitude, bounding_box.bottom_right_corner.longitude, bounding_box.top_left_corner.longitude))?;
         if estates_in_bounding_box.is_empty() {
             return Ok(Vec::new());
