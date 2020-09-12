@@ -925,13 +925,14 @@ async fn search_estates(
 
         params.push(per_page.into());
         params.push((page * per_page).into());
-        let estates = conn.exec(
+        let mut estates = conn.exec(
             format!(
-                "select * from estate where {} order by popularity desc, id asc limit ? offset ?",
+                "select * from estate where {} order by popularity, id asc limit ? offset ?",
                 search_condition
             ),
             &params,
         )?;
+        estates.reverse();
         Ok(EstateSearchResponse { count, estates })
     })
     .await
