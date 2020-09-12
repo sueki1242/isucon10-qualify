@@ -245,6 +245,9 @@ async fn initialize(
         })?;
         let mut cache = data.low_priced_estates.lock().unwrap();
         *cache = estates;
+
+        log::error!("initialize finished. cache : {:?}", data.low_priced_estates.lock().unwrap());
+
     }
     Ok(HttpResponse::Ok().json(InitializeResponse {
         language: "rust".to_owned(),
@@ -1001,6 +1004,7 @@ async fn get_low_priced_estate(
     })?;
 */
     let cached_estates = &(*data.low_priced_estates.lock().unwrap());
+    log::error!("cached_estates : {:?}", cached_estates);
     Ok(HttpResponse::Ok().json(EstateListResponse { estates: cached_estates.to_vec() }))
 }
 
