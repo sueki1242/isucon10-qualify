@@ -73,7 +73,6 @@ async fn main() -> std::io::Result<()> {
         .max_size(10)
         .build(manager)
         .expect("Failed to create connection pool");
-    
     newrelic_init!();
 
     let mut listenfd = ListenFd::from_env();
