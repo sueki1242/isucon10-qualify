@@ -5,9 +5,13 @@ use futures::TryStreamExt;
 use listenfd::ListenFd;
 use mysql::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::env;
 use std::fs::File;
 use std::sync::Arc;
+use std::sync::RwLock;
+use std::sync::Mutex;
+
 
 #[macro_use]
 mod newrelic_util;
@@ -74,6 +78,10 @@ impl Default for MultiMySQLConnectionEnv {
     }
 }
 
+struct AppCache {
+    low_priced_estates: Mutex<Vec<Estate>>,
+}
+
 #[derive(Clone)]
 struct MultiPool {
     chair: Pool,
@@ -96,6 +104,9 @@ async fn main() -> std::io::Result<()> {
         let file = File::open("../fixture/estate_condition.json")?;
         Arc::new(serde_json::from_reader(file)?)
     };
+    let app_cache = web::Data::new(AppCache {
+        low_priced_estates: Mutex::new(vec![]),
+    });
 
     let manager_chair = r2d2_mysql::MysqlConnectionManager::new(
         mysql::OptsBuilder::new()
@@ -139,6 +150,7 @@ async fn main() -> std::io::Result<()> {
             .data(mysql_connection_env.clone())
             .data(chair_search_condition.clone())
             .data(estate_search_condition.clone())
+            .app_data(app_cache.clone())
             .wrap(middleware::Logger::default())
             .route("/initialize", web::post().to(initialize))
             .service(
@@ -236,6 +248,8 @@ struct InitializeResponse {
 }
 
 async fn initialize(
+    db: web::Data<MultiPool>,
+    data: web::Data<AppCache>,
     mysql_connection_env: web::Data<Arc<MultiMySQLConnectionEnv>>,
 ) -> Result<HttpResponse, AWError> {
     newrelic_transaction!("POST /initialize");
@@ -272,6 +286,26 @@ async fn initialize(
                 return Ok(HttpResponse::InternalServerError().finish());
             }
         }
+    }
+    {
+        // initialize low_priced_estates
+        let estates = web::block(move || {
+            let mut conn = db.estate.get().expect("Failed to checkout database connection");
+            conn.exec(
+                "select * from estate order by rent asc, id asc limit ?",
+                (LIMIT,),
+            )
+        })
+        .await
+        .map_err(|e| {
+            log::error!("get_low_priced_estate DB execution error : {:?}", e);
+            HttpResponse::InternalServerError()
+        })?;
+        let mut cache = data.low_priced_estates.lock().unwrap();
+        *cache = estates;
+
+        log::error!("initialize finished. ");
+
     }
     Ok(HttpResponse::Ok().json(InitializeResponse {
         language: "rust".to_owned(),
@@ -712,7 +746,7 @@ async fn buy_chair(
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct Estate {
     id: i64,
     name: String,
@@ -813,7 +847,11 @@ impl Into<Estate> for CSVEstate {
     }
 }
 
-async fn post_estate(db: web::Data<MultiPool>, mut payload: Multipart) -> Result<HttpResponse, AWError> {
+async fn post_estate(
+    db: web::Data<MultiPool>, 
+    data: web::Data<AppCache>, 
+    mut payload: Multipart
+) -> Result<HttpResponse, AWError> {
     newrelic_transaction!("POST /api/estate");
 
     let mut estates: Option<Vec<Estate>> = None;
@@ -853,6 +891,15 @@ async fn post_estate(db: web::Data<MultiPool>, mut payload: Multipart) -> Result
             tx.exec_drop(query, (estate.id, estate.name, estate.description, estate.thumbnail, estate.address, estate.latitude, estate.longitude, estate.rent, estate.door_height, estate.door_width, estate.features, estate.popularity))?;
         }
         tx.commit()?;
+
+        let mut conn = db.estate.get().expect("Failed to checkout database connection");
+        let estates = conn.exec(
+            "select * from estate order by rent asc, id asc limit ?",
+            (LIMIT,),
+        )?;
+        let mut cache = data.low_priced_estates.lock().unwrap();
+        *cache = estates;
+
         Ok(())
     }).await.map_err(
         |e: BlockingDBError| {
@@ -1007,9 +1054,13 @@ struct EstateListResponse {
     estates: Vec<Estate>,
 }
 
-async fn get_low_priced_estate(db: web::Data<MultiPool>) -> Result<HttpResponse, AWError> {
+async fn get_low_priced_estate(
+    data: web::Data<AppCache>,
+    db: web::Data<MultiPool>
+) -> Result<HttpResponse, AWError> {
     newrelic_transaction!("GET /api/estate/low_priced");
 
+    /*
     let estates = web::block(move || {
         let mut conn = db.estate.get().expect("Failed to checkout database connection");
         conn.exec(
@@ -1022,8 +1073,10 @@ async fn get_low_priced_estate(db: web::Data<MultiPool>) -> Result<HttpResponse,
         log::error!("get_low_priced_estate DB execution error : {:?}", e);
         HttpResponse::InternalServerError()
     })?;
-
-    Ok(HttpResponse::Ok().json(EstateListResponse { estates }))
+*/
+    let cached_estates = &(*data.low_priced_estates.lock().unwrap());
+    log::error!("cached_estates : {:?}", cached_estates);
+    Ok(HttpResponse::Ok().json(EstateListResponse { estates: cached_estates.to_vec() }))
 }
 
 async fn get_estate_search_condition(
