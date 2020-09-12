@@ -27,21 +27,57 @@ struct MySQLConnectionEnv {
     password: String,
 }
 
-impl Default for MySQLConnectionEnv {
-    fn default() -> Self {
-        let port = if let Ok(port) = env::var("MYSQL_PORT") {
+#[derive(Debug)]
+struct MultiMySQLConnectionEnv {
+    chair: MySQLConnectionEnv,
+    estate: MySQLConnectionEnv,
+}
+
+impl MySQLConnectionEnv {
+    fn chair() -> Self {
+        let port = if let Ok(port) = env::var("CHAIR_MYSQL_PORT") {
             port.parse().unwrap_or(3306)
         } else {
             3306
         };
         Self {
-            host: env::var("MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".to_owned()),
+            host: env::var("CHAIR_MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".to_owned()),
             port,
-            user: env::var("MYSQL_USER").unwrap_or_else(|_| "isucon".to_owned()),
-            db_name: env::var("MYSQL_DBNAME").unwrap_or_else(|_| "isuumo".to_owned()),
-            password: env::var("MYSQL_PASS").unwrap_or_else(|_| "isucon".to_owned()),
+            user: env::var("CHAIR_MYSQL_USER").unwrap_or_else(|_| "isucon".to_owned()),
+            db_name: env::var("CHAIR_MYSQL_DBNAME").unwrap_or_else(|_| "isuumo".to_owned()),
+            password: env::var("CHAIR_MYSQL_PASS").unwrap_or_else(|_| "isucon".to_owned()),
         }
     }
+
+    fn estate() -> Self {
+        let port = if let Ok(port) = env::var("ESTATE_MYSQL_PORT") {
+            port.parse().unwrap_or(3306)
+        } else {
+            3306
+        };
+        Self {
+            host: env::var("ESTATE_MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".to_owned()),
+            port,
+            user: env::var("ESTATE_MYSQL_USER").unwrap_or_else(|_| "isucon".to_owned()),
+            db_name: env::var("ESTATE_MYSQL_DBNAME").unwrap_or_else(|_| "isuumo".to_owned()),
+            password: env::var("ESTATE_MYSQL_PASS").unwrap_or_else(|_| "isucon".to_owned()),
+        }
+    }
+}
+
+impl Default for MultiMySQLConnectionEnv {
+    fn default() -> Self {
+        MultiMySQLConnectionEnv{
+            chair: MySQLConnectionEnv::chair(),
+            estate: MySQLConnectionEnv::estate(),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct MultiPool {
+    chair: Pool,
+    estate: Pool,
 }
 
 #[actix_rt::main]
@@ -51,7 +87,7 @@ async fn main() -> std::io::Result<()> {
     }
     env_logger::init();
 
-    let mysql_connection_env = Arc::new(MySQLConnectionEnv::default());
+    let mysql_connection_env = Arc::new(MultiMySQLConnectionEnv::default());
     let chair_search_condition: Arc<ChairSearchCondition> = {
         let file = File::open("../fixture/chair_condition.json")?;
         Arc::new(serde_json::from_reader(file)?)
@@ -61,18 +97,37 @@ async fn main() -> std::io::Result<()> {
         Arc::new(serde_json::from_reader(file)?)
     };
 
-    let manager = r2d2_mysql::MysqlConnectionManager::new(
+    let manager_chair = r2d2_mysql::MysqlConnectionManager::new(
         mysql::OptsBuilder::new()
-            .ip_or_hostname(Some(&mysql_connection_env.host))
-            .tcp_port(mysql_connection_env.port)
-            .user(Some(&mysql_connection_env.user))
-            .db_name(Some(&mysql_connection_env.db_name))
-            .pass(Some(&mysql_connection_env.password)),
+            .ip_or_hostname(Some(&mysql_connection_env.chair.host))
+            .tcp_port(mysql_connection_env.chair.port)
+            .user(Some(&mysql_connection_env.chair.user))
+            .db_name(Some(&mysql_connection_env.chair.db_name))
+            .pass(Some(&mysql_connection_env.chair.password)),
     );
-    let pool = r2d2::Pool::builder()
+    let pool_chair = r2d2::Pool::builder()
         .max_size(10)
-        .build(manager)
-        .expect("Failed to create connection pool");
+        .build(manager_chair)
+        .expect("Failed to create connection pool for chair");
+
+    let manager_estate = r2d2_mysql::MysqlConnectionManager::new(
+        mysql::OptsBuilder::new()
+            .ip_or_hostname(Some(&mysql_connection_env.estate.host))
+            .tcp_port(mysql_connection_env.estate.port)
+            .user(Some(&mysql_connection_env.estate.user))
+            .db_name(Some(&mysql_connection_env.estate.db_name))
+            .pass(Some(&mysql_connection_env.estate.password)),
+    );
+    let pool_estate = r2d2::Pool::builder()
+        .max_size(10)
+        .build(manager_estate)
+        .expect("Failed to create connection pool for estate");
+    
+    let pool = MultiPool{
+        chair: pool_chair,
+        estate: pool_estate,
+    };
+
     newrelic_init!();
 
     let mut listenfd = ListenFd::from_env();
@@ -179,7 +234,7 @@ struct InitializeResponse {
 }
 
 async fn initialize(
-    mysql_connection_env: web::Data<Arc<MySQLConnectionEnv>>,
+    mysql_connection_env: web::Data<Arc<MultiMySQLConnectionEnv>>,
 ) -> Result<HttpResponse, AWError> {
     newrelic_transaction!("POST /initialize");
 
@@ -189,29 +244,31 @@ async fn initialize(
         sql_dir.join("1_DummyEstateData.sql"),
         sql_dir.join("2_DummyChairData.sql"),
     ];
-    for p in paths.iter() {
-        let sql_file = p.canonicalize().unwrap();
-        let cmd_str = format!(
-            "mysql -h {} -P {} -u {} -p{} {} < {}",
-            mysql_connection_env.host,
-            mysql_connection_env.port,
-            mysql_connection_env.user,
-            mysql_connection_env.password,
-            mysql_connection_env.db_name,
-            sql_file.display()
-        );
-        let status = tokio::process::Command::new("bash")
-            .arg("-c")
-            .arg(cmd_str)
-            .status()
-            .await
-            .map_err(|e| {
-                log::error!("Initialize script {} failed : {:?}", p.display(), e);
-                HttpResponse::InternalServerError()
-            })?;
-        if !status.success() {
-            log::error!("Initialize script {} failed", p.display());
-            return Ok(HttpResponse::InternalServerError().finish());
+    for env in &[&mysql_connection_env.chair, &mysql_connection_env.estate] {
+        for p in paths.iter() {
+            let sql_file = p.canonicalize().unwrap();
+            let cmd_str = format!(
+                "mysql -h {} -P {} -u {} -p{} {} < {}",
+                env.host,
+                env.port,
+                env.user,
+                env.password,
+                env.db_name,
+                sql_file.display()
+            );
+            let status = tokio::process::Command::new("bash")
+                .arg("-c")
+                .arg(cmd_str)
+                .status()
+                .await
+                .map_err(|e| {
+                    log::error!("Initialize script {} failed : {:?}", p.display(), e);
+                    HttpResponse::InternalServerError()
+                })?;
+            if !status.success() {
+                log::error!("Initialize script {} failed", p.display());
+                return Ok(HttpResponse::InternalServerError().finish());
+            }
         }
     }
     Ok(HttpResponse::Ok().json(InitializeResponse {
@@ -262,7 +319,7 @@ impl FromRow for Chair {
 }
 
 async fn get_chair_detail(
-    db: web::Data<Pool>,
+    db: web::Data<MultiPool>,
     path: web::Path<(i64,)>,
 ) -> Result<HttpResponse, AWError> {
     newrelic_transaction!("GET /api/chair/{id}");
@@ -270,7 +327,7 @@ async fn get_chair_detail(
     let id = path.0;
 
     let chair: Option<Chair> = web::block(move || {
-        let mut conn = db.get().expect("Failed to checkout database connection");
+        let mut conn = db.chair.get().expect("Failed to checkout database connection");
         conn.exec_first("select * from chair where id = ?", (id,))
     })
     .await
@@ -329,7 +386,7 @@ impl Into<Chair> for CSVChair {
     }
 }
 
-async fn post_chair(db: web::Data<Pool>, mut payload: Multipart) -> Result<HttpResponse, AWError> {
+async fn post_chair(db: web::Data<MultiPool>, mut payload: Multipart) -> Result<HttpResponse, AWError> {
     newrelic_transaction!("POST /api/chair");
 
     let mut chairs: Option<Vec<Chair>> = None;
@@ -362,7 +419,7 @@ async fn post_chair(db: web::Data<Pool>, mut payload: Multipart) -> Result<HttpR
     let chairs = chairs.unwrap();
 
     web::block(move || {
-        let mut conn = db.get().expect("Failed to checkout database connection");
+        let mut conn = db.chair.get().expect("Failed to checkout database connection");
         let mut tx = conn.start_transaction(mysql::TxOpts::default())?;
         for chair in chairs {
             let params: Vec<mysql::Value> = vec![
@@ -421,7 +478,7 @@ struct ChairSearchResponse {
 
 async fn search_chairs(
     chair_search_condition: web::Data<Arc<ChairSearchCondition>>,
-    db: web::Data<Pool>,
+    db: web::Data<MultiPool>,
     query_params: web::Query<SearchChairsParams>,
 ) -> Result<HttpResponse, AWError> {
     newrelic_transaction!("GET /api/chair/search");
@@ -543,7 +600,7 @@ async fn search_chairs(
 
     let search_condition = conditions.join(" and ");
     let res = web::block(move || {
-        let mut conn = db.get().expect("Failed to checkout database connection");
+        let mut conn = db.chair.get().expect("Failed to checkout database connection");
         let row = conn.exec_first(
             format!("select count(*) from chair where {}", search_condition),
             &params,
@@ -584,11 +641,11 @@ struct ChairListResponse {
     chairs: Vec<Chair>,
 }
 
-async fn get_low_priced_chair(db: web::Data<Pool>) -> Result<HttpResponse, AWError> {
+async fn get_low_priced_chair(db: web::Data<MultiPool>) -> Result<HttpResponse, AWError> {
     newrelic_transaction!("GET /api/chair/low_priced");
 
     let chairs = web::block(move || {
-        let mut conn = db.get().expect("Failed to checkout database connection");
+        let mut conn = db.chair.get().expect("Failed to checkout database connection");
         conn.exec(
             "select * from chair where stock > 0 order by price asc, id asc limit ?",
             (LIMIT,),
@@ -617,7 +674,7 @@ struct BuyChairRequest {
 }
 
 async fn buy_chair(
-    db: web::Data<Pool>,
+    db: web::Data<MultiPool>,
     path: web::Path<(i64,)>,
     _params: web::Json<BuyChairRequest>,
 ) -> Result<HttpResponse, AWError> {
@@ -626,7 +683,7 @@ async fn buy_chair(
     let id = path.0;
 
     let found: bool = web::block(move || {
-        let mut conn = db.get().expect("Failed to checkout database connection");
+        let mut conn = db.chair.get().expect("Failed to checkout database connection");
         let mut tx = conn.start_transaction(mysql::TxOpts::default())?;
         let row: Option<Chair> = tx.exec_first(
             "select * from chair where id = ? and stock > 0 for update",
@@ -695,7 +752,7 @@ impl FromRow for Estate {
 }
 
 async fn get_estate_detail(
-    db: web::Data<Pool>,
+    db: web::Data<MultiPool>,
     path: web::Path<(i64,)>,
 ) -> Result<HttpResponse, AWError> {
     newrelic_transaction!("GET /api/estate/{id}");
@@ -703,7 +760,7 @@ async fn get_estate_detail(
     let id = path.0;
 
     let estate: Option<Estate> = web::block(move || {
-        let mut conn = db.get().expect("Failed to checkout database connection");
+        let mut conn = db.estate.get().expect("Failed to checkout database connection");
         conn.exec_first("select * from estate where id = ?", (id,))
     })
     .await
@@ -754,7 +811,7 @@ impl Into<Estate> for CSVEstate {
     }
 }
 
-async fn post_estate(db: web::Data<Pool>, mut payload: Multipart) -> Result<HttpResponse, AWError> {
+async fn post_estate(db: web::Data<MultiPool>, mut payload: Multipart) -> Result<HttpResponse, AWError> {
     newrelic_transaction!("POST /api/estate");
 
     let mut estates: Option<Vec<Estate>> = None;
@@ -787,7 +844,7 @@ async fn post_estate(db: web::Data<Pool>, mut payload: Multipart) -> Result<Http
     let estates = estates.unwrap();
 
     web::block(move || {
-        let mut conn = db.get().expect("Failed to checkout database connection");
+        let mut conn = db.estate.get().expect("Failed to checkout database connection");
         let mut tx = conn.start_transaction(mysql::TxOpts::default())?;
         for estate in estates {
             let query = format!("insert into estate (id, name, description, thumbnail, address, latitude, longitude, rent, door_height, door_width, features, popularity, location) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, Point({}, {}))", estate.latitude, estate.longitude);
@@ -827,7 +884,7 @@ struct EstateSearchResponse {
 
 async fn search_estates(
     estate_search_condition: web::Data<Arc<EstateSearchCondition>>,
-    db: web::Data<Pool>,
+    db: web::Data<MultiPool>,
     query_params: web::Query<SearchEstatesParams>,
 ) -> Result<HttpResponse, AWError> {
     newrelic_transaction!("GET /api/estate/search");
@@ -917,7 +974,7 @@ async fn search_estates(
 
     let search_condition = conditions.join(" and ");
     let res = web::block(move || {
-        let mut conn = db.get().expect("Failed to checkout database connection");
+        let mut conn = db.estate.get().expect("Failed to checkout database connection");
         let row = conn.exec_first(
             format!("select count(*) from estate where {}", search_condition),
             &params,
@@ -948,11 +1005,11 @@ struct EstateListResponse {
     estates: Vec<Estate>,
 }
 
-async fn get_low_priced_estate(db: web::Data<Pool>) -> Result<HttpResponse, AWError> {
+async fn get_low_priced_estate(db: web::Data<MultiPool>) -> Result<HttpResponse, AWError> {
     newrelic_transaction!("GET /api/estate/low_priced");
 
     let estates = web::block(move || {
-        let mut conn = db.get().expect("Failed to checkout database connection");
+        let mut conn = db.estate.get().expect("Failed to checkout database connection");
         conn.exec(
             "select * from estate order by rent asc, id asc limit ?",
             (LIMIT,),
@@ -976,7 +1033,7 @@ async fn get_estate_search_condition(
 }
 
 async fn search_recommended_estate_with_chair(
-    db: web::Data<Pool>,
+    db: web::Data<MultiPool>,
     path: web::Path<(i64,)>,
 ) -> Result<HttpResponse, AWError> {
     newrelic_transaction!("GET /api/recommended_estate/{id}");
@@ -984,8 +1041,9 @@ async fn search_recommended_estate_with_chair(
     let id = path.0;
 
     let estates = web::block(move || {
-        let mut conn = db.get().expect("Failed to checkout database connection");
-        let chair: Option<Chair> = conn.exec_first("select * from chair where id = ?", (id,))?;
+        let mut conn_estate = db.estate.get().expect("Failed to checkout database connection");
+        let mut conn_chair = db.chair.get().expect("Failed to checkout database connection");
+        let chair: Option<Chair> = conn_chair.exec_first("select * from chair where id = ?", (id,))?;
         if let Some(chair) = chair {
             let mut whd = vec![chair.width, chair.height, chair.depth];
             whd.sort();
@@ -997,7 +1055,7 @@ async fn search_recommended_estate_with_chair(
                 whd[0].into(),
                 LIMIT.into(),
             ];
-            Ok(Some(conn.exec(query, params)?))
+            Ok(Some(conn_estate.exec(query, params)?))
         } else {
             Ok(None)
         }
@@ -1072,7 +1130,7 @@ struct BoundingBox {
 }
 
 async fn search_estate_nazotte(
-    db: web::Data<Pool>,
+    db: web::Data<MultiPool>,
     coordinates: web::Json<Coordinates>,
 ) -> Result<HttpResponse, AWError> {
     newrelic_transaction!("POST /api/estate/nazotte");
@@ -1083,7 +1141,7 @@ async fn search_estate_nazotte(
     // let bounding_box = coordinates.get_bounding_box();
 
     let mut estates = web::block(move || {
-        let mut conn = db.get().expect("Failed to checkout database connection");
+        let mut conn = db.estate.get().expect("Failed to checkout database connection");
         let query = format!("select * from estate where ST_Contains(ST_PolygonFromText({}), location) order by popularity desc, id asc", coordinates.coordinates_to_text());
         let estates_in_polygon: Vec<Estate> = conn.exec(query, ())?;
 
@@ -1108,7 +1166,7 @@ struct PostEstateRequestDocumentParams {
 }
 
 async fn post_estate_request_document(
-    db: web::Data<Pool>,
+    db: web::Data<MultiPool>,
     path: web::Path<(i64,)>,
     _params: web::Json<PostEstateRequestDocumentParams>,
 ) -> Result<HttpResponse, AWError> {
@@ -1117,7 +1175,7 @@ async fn post_estate_request_document(
     let id = path.0;
 
     let estate: Option<Estate> = web::block(move || {
-        let mut conn = db.get().expect("Failed to checkout database connection");
+        let mut conn = db.estate.get().expect("Failed to checkout database connection");
         conn.exec_first("select * from estate where id = ?", (id,))
     })
     .await
