@@ -137,7 +137,7 @@ async fn main() -> std::io::Result<()> {
         .expect("Failed to checkout database connection")
         .exec("select * from estate order by rent asc, id asc limit ?",
               (LIMIT,),)
-        .unwrap();
+        .expect("Failed to fetch lower price estates at app start");
     
     let app_cache = web::Data::new(AppCache {
         low_priced_estates: Mutex::new(initial_estates),
