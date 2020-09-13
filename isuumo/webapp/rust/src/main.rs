@@ -104,9 +104,6 @@ async fn main() -> std::io::Result<()> {
         let file = File::open("../fixture/estate_condition.json")?;
         Arc::new(serde_json::from_reader(file)?)
     };
-    let app_cache = web::Data::new(AppCache {
-        low_priced_estates: Mutex::new(vec![]),
-    });
 
     let manager_chair = r2d2_mysql::MysqlConnectionManager::new(
         mysql::OptsBuilder::new()
@@ -135,6 +132,16 @@ async fn main() -> std::io::Result<()> {
         .connection_timeout(std::time::Duration::from_secs(300))
         .build(manager_estate)
         .expect("Failed to create connection pool for estate");
+
+    let initial_estates = pool_estate.get()
+        .expect("Failed to checkout database connection")
+        .exec("select * from estate order by rent asc, id asc limit ?",
+              (LIMIT,),)
+        .unwrap();
+    
+    let app_cache = web::Data::new(AppCache {
+        low_priced_estates: Mutex::new(initial_estates),
+    });
     
     let pool = MultiPool{
         chair: pool_chair,
